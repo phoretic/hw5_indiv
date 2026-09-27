@@ -22,11 +22,11 @@ class OccupancyGridMappingSim:
 
         # Log-odds values
         # --------------------------- TBD ------------------------
-        self.l0 = ... # initial probability of all cells will be 0.5. convert this to log odds value
-        self.log_occ = ...   # use higher positive values [0, 1] for occupied cell
-        self.log_free = ...  # use smaller negative values [0, 1] for empty cells
-        self.log_min = ...  # calculate log odds lower bounds for probability = 0.1
-        self.log_max = ...  # calculate log odds upper bounds for probability = 0.9
+        self.l0 = np.log(0.5 / (1 - 0.5)) # initial probability of all cells will be 0.5. convert this to log odds value
+        self.log_occ = np.log(0.6 / (1 - 0.6))   # use higher positive values [0, 1] for occupied cell
+        self.log_free = np.log(0.3 / (1 - 0.3))  # use smaller negative values [0, 1] for empty cells
+        self.log_min = np.log(0.1 / (1 - 0.1))  # calculate log odds lower bounds for probability = 0.1
+        self.log_max = np.log(0.9 / (1 - 0.9))  # calculate log odds upper bounds for probability = 0.9
         # ----------------------- TBD ENDS ------------------------
 
         # Initialize occupancy grid
@@ -127,8 +127,8 @@ class OccupancyGridMappingSim:
             # this is the log odds updates for the occupied grid.
 
             if self.obstacle_mask[y, x]:
-                lt_1 = ...
-                lt = ...  
+                lt_1 = self.log_odds[x, y]
+                lt = lt_1 + self.log_occ - self.l0
                 self.log_odds[y, x] = np.clip(lt, self.log_min, self.log_max)  # this to keep it within a certain range
                 self.current_hit = (x, y)
                 break
@@ -136,8 +136,8 @@ class OccupancyGridMappingSim:
             # this is the log odds updates for the free grid.
 
             else:
-                lt_1 = ...
-                lt = ...
+                lt_1 = self.log_odds[x, y]
+                lt = lt_1 + self.log_free - self.l0
                 self.log_odds[y, x] = np.clip(lt, self.log_min, self.log_max)
                 self.current_ray.append((x, y))
             # --------------------------- TBD- END ------------------------
@@ -145,10 +145,10 @@ class OccupancyGridMappingSim:
 
         # --------------------------- TBD ------------------------
         # Convert log-odds to occupancy grid values: unknown = -1, else scale probability [0–100]
-        exp_log_odds = ...
-        prob = ...  # by this time you have log odds, convert to probability.
-        display = ...  # convert the range accordingly. this is also done in ROS2. also it should be int8 type
-        display[np.isclose(np.exp(self.log_odds), np.exp(self.l0))] = ... # value for unknown
+        exp_log_odds = np.exp(-self.log_odds)
+        prob = 1 / (1 + exp_log_odds)  # by this time you have log odds, convert to probability.
+        display = np.int8(100*prob)  # convert the range accordingly. this is also done in ROS2. also it should be int8 type
+        display[np.isclose(np.exp(self.log_odds), np.exp(self.l0))] = -1 # value for unknown
         # --------------------------- TBD - END ------------------------
 
         self.img.set_data(display)

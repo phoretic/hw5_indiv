@@ -4,11 +4,16 @@
 // Include message types
 #include "sensor_msgs/msg/imu.hpp"          
 #include "nav_msgs/msg/odometry.hpp"
+#include "std_msgs/msg/float64.hpp"
 
 // Include message_filters for synchronization
 #include "message_filters/subscriber.h"
 #include "message_filters/synchronizer.h"
 #include "message_filters/sync_policies/approximate_time.h"
+
+#include "tf2/utils.h"
+#include "tf2_geometry_msgs/tf2_geometry_msgs.hpp"
+#include <cmath>
 
 // For binding placeholders used in callback
 using std::placeholders::_1;
@@ -24,10 +29,15 @@ public:
     // ------------ TBD --------------
     // Create a message_filters::Subscriber for IMU topic
     // Use rmw_qos_profile_sensor_data for low-latency, best-effort delivery
-    imu_sub_ = ...; // subscription to /imu using rmw_qos_profile_sensor_data QoS
+    imu_sub_ = std::make_shared<message_filters::Subscriber<sensor_msgs::msg::Imu>>(this,
+      "/imu", rmw_qos_profile_sensor_data); // subscription to /imu using rmw_qos_profile_sensor_data QoS
 
     // Create a message_filters::Subscriber for Odometry topic
-    odom_sub_ = ...; // subscription to /odom using rmw_qos_profile_sensor_data
+    odom_sub_ = std::make_shared<message_filters::Subscriber<nav_msgs::msg::Odometry>>(this,
+      "/odom", rmw_qos_profile_sensor_data); // subscription to /odom using rmw_qos_profile_sensor_data
+
+    // create the publisher?
+    fused_pub = this->create_publisher<std_msgs::msg::Float64>("/yaw/fused", 10);
 
     // ------------- TBD END -----------------
 
@@ -40,6 +50,14 @@ public:
   }
 
 private:
+  double dt = 0;
+  bool initial_call = true;
+  rclcpp::Time prev_time;
+  double imu_yaw = 0;
+  double pi = M_PI;
+  float alpha = 0.5;
+  rclcpp::Publisher<std_msgs::msg::Float64>::SharedPtr fused_pub;
+
   // Callback function triggered when synchronized IMU and Odometry messages are received
   void callback(const sensor_msgs::msg::Imu::ConstSharedPtr imu_msg,
                 const nav_msgs::msg::Odometry::ConstSharedPtr odom_msg)
@@ -62,7 +80,43 @@ private:
 
     //---------------------- TBD Comp Filter Stuff -------------------
 	  // Create a publisher for the fused data here and convert your HW4 code as well
-    
+    // extract odom angle
+    tf2::Quaternion quat;
+    tf2::fromMsg(ori_odom, quat);
+    double odom_yaw = tf2::getYaw(quat);
+    odom_yaw = std::fmod((odom_yaw + pi), (2 * pi));
+    if (odom_yaw < 0) {
+      odom_yaw += 2*pi;
+    }
+    odom_yaw += -1*pi;
+
+    //integrate for imu angle
+    rclcpp::Time curr_time = imu_msg->header.stamp;
+    if (initial_call) {
+      prev_time = curr_time;
+      initial_call = false;
+    }
+    dt = (curr_time - prev_time).seconds();
+    prev_time = curr_time;
+    imu_yaw += imu_msg->angular_velocity.z * dt;
+    imu_yaw = std::fmod((imu_yaw + pi), (2 * pi));
+    if (imu_yaw < 0) {
+      imu_yaw += 2*pi;
+    }
+    imu_yaw += -1*pi;
+
+    // weighted average for fused angle
+    double fused_yaw = alpha * imu_yaw + ((1 - alpha) * odom_yaw);
+    fused_yaw = std::fmod((fused_yaw + pi), (2 * pi));
+    if (fused_yaw < 0) {
+      fused_yaw += 2*pi;
+    }
+    fused_yaw += -1*pi;
+
+    std_msgs::msg::Float64 msg;
+    msg.data = fused_yaw;
+    fused_pub->publish(msg);
+
     //----------------------------------------------------------------
   }
 
